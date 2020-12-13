@@ -1,12 +1,10 @@
-test = require('tape')
-sinon = require('sinon')
-_ = require('lodash')
-AlephBet = require('../src/alephbet')
+import AlephBet from '../src/alephbet'
+import _ from 'lodash'
 
 storage = null
 tracking = null
 experiment = null
-activate = sinon.spy()
+activate = null
 
 class TestStorage
   @namespace: 'alephbet'
@@ -18,15 +16,14 @@ class TestStorage
     @storage[key]
 
 class TestTracking
-  experiment_start: sinon.spy()
-  goal_complete: sinon.spy()
+  experiment_start: jest.fn()
+  goal_complete: jest.fn()
 
-setup = ->
+beforeEach ->
+  jest.resetAllMocks()
   storage = new TestStorage
   tracking = new TestTracking
-  activate.reset()
-  tracking.experiment_start.reset()
-  tracking.goal_complete.reset()
+  activate = jest.fn()
 
   default_options =
     name: 'experiment'
@@ -40,60 +37,113 @@ setup = ->
   experiment = (options={}) ->
     new AlephBet.Experiment(_.defaults(options, default_options))
 
-describe = (description, fn) ->
-  test description, (t) ->
-    setup()
-    fn(t)
-
-describe 'starts the experiment', (t) ->
+test 'starts the experiment', () ->
   ex = experiment({name: 'my-experiment'})
-  t.plan(6)
-  t.assert(storage.get('my-experiment:in_sample') == true, 'in sample')
+  expect(storage.get('my-experiment:in_sample')).toBeTruthy()
   variant = ex.get_stored_variant()
-  t.equal(variant, storage.get('my-experiment:variant'))
-  t.assert(variant == 'blue' || variant == 'red', 'assigns blue or red variant')
-  t.assert(activate.callCount == 1, 'activate function was called once')
-  t.assert(activate.calledWith(ex), 'was called with experiment')
-  t.assert(tracking.experiment_start.callCount == 1, 'experiment_start tracking was called once')
+  expect(variant).toEqual(storage.get('my-experiment:variant'))
+  expect(variant == 'blue' || variant == 'red').toBeTruthy()
+  expect(activate).toHaveBeenCalledTimes(1)
+  expect(activate).toHaveBeenCalledWith(ex)
+  expect(tracking.experiment_start).toHaveBeenCalledTimes(1)
 
-describe 'sticks to the same variant after choosing it', (t) ->
+test 'validates experiment parameters', () ->
+  expect(->
+    new AlephBet.Experiment()
+  ).toThrowError(
+    new Error('an experiment name must be specified')
+  )
+  expect(->
+    new AlephBet.Experiment(name: 'Test')
+  ).toThrowError(
+    new Error('variants must be provided')
+  )
+  expect(->
+    new AlephBet.Experiment(name: 'Test', variants: {}, trigger: "")
+  ).toThrowError(
+    new Error('trigger must be a function')
+  )
+
+test 'deterministic variant with a given user_id', () ->
+  ex = experiment({user_id: 'yuzu'})
+  expect(ex.pick_variant()).toBe('blue')
+  ex = experiment({user_id: 'gosho'})
+  expect(ex.pick_variant()).toBe('red')
+
+test 'sticks to the same variant after choosing it', () ->
   ex = experiment({name: 'variant test'})
   variant = ex.get_stored_variant()
   experiment({name: 'variant test'})
   experiment({name: 'variant test'})
-  t.plan(1)
-  t.assert(activate.callCount == 3, 'always calling activate for the same variant')
+  expect(activate).toHaveBeenCalledTimes(3)
 
-describe 'not in sample', (t) ->
+test 'not in sample', () ->
   experiment({sample: 0.0})
-  t.plan(2)
-  t.equal(storage.get('experiment:in_sample'), false)
-  t.assert(tracking.experiment_start.callCount == 0, 'experiment_start tracking was not called')
+  expect(storage.get('experiment:in_sample')).toBeFalsy()
+  expect(tracking.experiment_start).not.toHaveBeenCalled()
 
-describe 'trigger is false', (t) ->
+test 'trigger is false', () ->
   experiment({trigger: -> false})
-  t.plan(1)
-  t.assert(tracking.experiment_start.callCount == 0, 'experiment_start tracking was not called')
+  expect(tracking.experiment_start).not.toHaveBeenCalled()
 
-describe 'trigger is false after participating', (t) ->
+test 'trigger is false after participating', () ->
   experiment({trigger: -> true})
   experiment({trigger: -> false})
-  t.plan(1)
-  t.assert(activate.callCount == 2, 'activate function is still called')
+  expect(activate).toHaveBeenCalledTimes(2)
 
-describe 'tracks goals', (t) ->
+test 'tracks goals', () ->
   ex = experiment({name: 'with-goals'})
   ex.goal_complete('my goal')
   ex.goal_complete('my goal')
-  t.plan(2)
-  t.assert(tracking.goal_complete.callCount == 1, 'goal_complete was called only once')
-  t.assert(storage.get('with-goals:my goal') == true, 'goal stored')
+  expect(tracking.goal_complete).toHaveBeenCalledTimes(1)
+  expect(storage.get('with-goals:my goal')).toBeTruthy()
 
-describe 'tracks non unique goals', (t) ->
+test 'tracks non unique goals', () ->
   ex = experiment({name: 'with-goals'})
   ex.goal_complete('my goal', unique: false)
   ex.goal_complete('my goal', unique: false)
-  t.plan(2)
-  t.assert(tracking.goal_complete.callCount == 2, 'goal_complete was called twice')
-  t.notOk(storage.get('with-goals:my goal'), 'goal not stored')
+  expect(tracking.goal_complete).toHaveBeenCalledTimes(2)
+  expect(storage.get('with-goals:my goal')).toBeFalsy()
 
+test 'when all variants have weights', () ->
+  ex = experiment({
+    name: 'with-weights'
+    variants:
+      blue:
+        weight: 0
+        activate: activate
+      green:
+        weight: 100
+        activate: activate
+  })
+  expect(ex.pick_variant()).toBe('green')
+  expect(ex.pick_variant()).not.toBe('blue')
+
+test 'when all variants have weights (with user_id)', () ->
+  ex = experiment({
+    user_id: 'yuzu'
+    variants:
+      blue:
+        weight: 20
+        activate: activate
+      red:
+        weight: 80
+        activate: activate
+  })
+  expect(ex.pick_variant()).toBe('blue')
+  ex.user_id = 'gosho'
+  expect(ex.pick_variant()).toBe('red')
+
+test 'when only some variants have weights', () ->
+  expect(->
+    experiment({
+      name: 'not-all-weights'
+      variants:
+        blue:
+          activate: activate
+        green:
+          weight: 100
+          activate: activate
+    })
+  ).toThrow()
+  expect(activate).not.toHaveBeenCalled()

@@ -1,10 +1,7 @@
 {
   "name": "alephbet",
-  "version": "0.14.4",
+  "version": "0.21.0",
   "author": "Yoav Aner <yoav@gingerlime.com>",
-  "browser": {
-    "lodash.custom": "./vendor/lodash.custom.min.js"
-  },
   "files": [
     "lib",
     "dist",
@@ -14,36 +11,47 @@
   ],
   "browserify": {
     "transform": [
-	  "coffeeify"
+      "coffeeify"
     ]
   },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "coffee"
+    ],
+    "testRegex": "/test/.+_test\\.coffee?",
+    "transform": {
+      "^.+\\.jsx?$": "babel-jest",
+      "^.+\\.coffee$": "<rootDir>/test/preprocessor.js"
+    }
+  },
   "dependencies": {
-    "lodash": "^3.9.3",
-    "store": "~1.3.17",
-    "node-uuid": "1.4.2"
+    "basil.js": "^0.4.11",
+    "sha1": "^1.1.1",
+    "uuid": "^8.3.2"
   },
   "devDependencies": {
-    "browserify": "~10.2.3",
-    "coffeeify": "~1.1.0",
-    "lodash-cli": "^3.9.3",
-    "uglify-js": "2.4.23",
-    "watchify": "^3.2.2",
-    "coffeetape": "^1.0.1",
-    "tape-run": "^2.1.4",
-    "sinon": "^1.17.3"
+    "@babel/core": "^7.5.5",
+    "@babel/preset-env": "^7.12.7",
+    "babel-jest": "^26.6.3",
+    "coffee-loader": "^1.0.1",
+    "coffeescript": "^2.5.1",
+    "coffeetape": "^2.0.0",
+    "jest": "^26.6.3",
+    "lodash": "^4.17.20",
+    "webpack": "^5.4.0",
+    "webpack-bundle-analyzer": "^4.1.0",
+    "webpack-cli": "^4.2.0"
   },
   "scripts": {
-    "lodash-custom": "lodash -p include=keys,defaults,remove exports=node -o ./vendor/lodash.custom.min.js",
-    "build-debug": "browserify --extension='.coffee' src/alephbet.coffee -d --standalone AlephBet -o dist/alephbet.js",
-    "build-min": "browserify --extension='.coffee' src/alephbet.coffee --standalone AlephBet | uglifyjs -c > dist/alephbet.min.js",
-    "build": "npm run coffeefy && npm run lodash-custom && npm run build-debug && npm run build-min",
-	"coffeefy": "coffee -c -o lib src",
-    "test-standalone": "browserify --extension='.coffee' test/alephbet_test.coffee > test/bundle.js && echo '<script src=\"bundle.js\"></script>' > test/test.html",
-    "test": "browserify --extension='.coffee' test/alephbet_test.coffee | tape-run",
-    "watch": "watchify src/alephbet.coffee -d --standalone AlephBet -o dist/alephbet.js -v"
+    "build": "webpack",
+    "analyze": "webpack --analyze",
+    "test": "jest --verbose",
+    "watch": "jest --watch",
+    "debug": "node --inspect-brk node_modules/.bin/jest --runInBand"
   },
   "description": "AlephBet is a pure-javascript A/B (multivariate) testing framework for developers.",
-  "main": "lib/alephbet.js",
+  "main": "dist/alephbet.min.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/Alephbet/alephbet.git"

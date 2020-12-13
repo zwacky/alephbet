@@ -1,28 +1,28 @@
-utils = require('./utils')
-Storage = require('./storage')
+import Storage from './storage'
+import utils from './utils'
 
 class Adapters
 
-  ## Adapter for using the gimel backend. See https://github.com/Alephbet/gimel
+  ## A parent class Adapter for using the Alephbet backend API.
   ## uses jQuery to send data if `$.ajax` is found. Falls back on plain js xhr
   ## params:
-  ## - url: Gimel track URL to post events to
-  ## - namepsace: namespace for Gimel (allows setting different environments etc)
-  ## - storage (optional) - storage adapter for the queue
-  class @GimelAdapter
-    queue_name: '_gimel_queue'
+  ## - url: track URL to post events to
+  ## - namepsace (optional): allows setting different environments etc
+  ## - storage (optional): storage adapter for the queue
+  class @AlephbetAdapter
+    queue_name: '_alephbet_queue'
 
-    constructor: (url, namespace, storage = Adapters.LocalStorageAdapter) ->
+    constructor: (url, namespace = 'alephbet', storage = Adapters.LocalStorageAdapter) ->
       @_storage = storage
       @url = url
       @namespace = namespace
       @_queue = JSON.parse(@_storage.get(@queue_name) || '[]')
       @_flush()
 
-    _remove_uuid: (uuid) ->
+    _remove_quuid: (quuid) ->
       (err, res) =>
         return if err
-        utils.remove(@_queue, (el) -> el.properties.uuid == uuid)
+        utils.remove(@_queue, (el) -> el.properties._quuid == quuid)
         @_storage.set(@queue_name, JSON.stringify(@_queue))
 
     _jquery_get: (url, data, callback) ->
@@ -52,28 +52,66 @@ class Adapters
 
     _flush: ->
       for item in @_queue
-        callback = @_remove_uuid(item.properties.uuid)
-        @_ajax_get(@url, item.properties, callback)
+        callback = @_remove_quuid(item.properties._quuid)
+        @_ajax_get(@url, utils.omit(item.properties, '_quuid'), callback)
         null
 
-    _track: (experiment_name, variant, event) ->
-      utils.log("Persistent Queue Gimel track: #{@namespace}, #{experiment_name}, #{variant}, #{event}")
+    _user_uuid: (experiment, goal) ->
+      return utils.uuid() unless experiment.user_id
+      # if goal is not unique, we track it every time. return a new random uuid
+      return utils.uuid() unless goal.unique
+      # for a given user id, namespace, goal and experiment, the uuid will always be the same
+      # this avoids counting goals twice for the same user across different devices
+      utils.sha1("#{@namespace}.#{experiment.name}.#{goal.name}.#{experiment.user_id}")
+
+    _track: (experiment, variant, goal) ->
+      utils.log("Persistent Queue track: #{@namespace}, #{experiment.name}, #{variant}, #{goal.name}")
       @_queue.shift() if @_queue.length > 100
       @_queue.push
         properties:
-          experiment: experiment_name
-          uuid: utils.uuid()
+          experiment: experiment.name
+          _quuid: utils.uuid()  # queue uuid (used only internally)
+          uuid: @_user_uuid(experiment, goal)
           variant: variant
-          event: event
+          event: goal.name
           namespace: @namespace
       @_storage.set(@queue_name, JSON.stringify(@_queue))
       @_flush()
 
-    experiment_start: (experiment_name, variant) =>
-      @_track(experiment_name, variant, 'participate')
+    experiment_start: (experiment, variant) ->
+      @_track(experiment, variant, {name: 'participate', unique: true})
 
-    goal_complete: (experiment_name, variant, goal) =>
-      @_track(experiment_name, variant, goal)
+    goal_complete: (experiment, variant, goal_name, props) ->
+      @_track(experiment, variant, utils.defaults({name: goal_name}, props))
+
+  ## Adapter for using the lamed backend. See https://github.com/Alephbet/lamed
+  ## inherits from AlephbetAdapter which uses the same backend API
+  ##
+  class @LamedAdapter extends @AlephbetAdapter
+    queue_name: '_lamed_queue'
+
+  ## Adapter for using the gimel backend. See https://github.com/Alephbet/gimel
+  ## The main difference is the user_uuid generation (for backwards compatibility)
+  ## params:
+  ## - url: Gimel track URL to post events to
+  ## - namepsace: namespace for Gimel (allows setting different environments etc)
+  ## - storage (optional) - storage adapter for the queue
+  class @GimelAdapter extends @AlephbetAdapter
+    queue_name: '_lamed_queue'
+
+    _user_uuid: (experiment, goal) ->
+      return utils.uuid() unless experiment.user_id
+      # if goal is not unique, we track it every time. return a new random uuid
+      return utils.uuid() unless goal.unique
+      # for a given user id, namespace and experiment, the uuid will always be the same
+      # this avoids counting goals twice for the same user across different devices
+      utils.sha1("#{@namespace}.#{experiment.name}.#{experiment.user_id}")
+
+  ## Adapter for using the lamed backend. See https://github.com/Alephbet/lamed
+  ## inherits from AlephbetAdapter which uses the same backend API
+  ##
+  class @RailsAdapter extends @AlephbetAdapter
+    queue_name: '_rails_queue'
 
 
   class @PersistentQueueGoogleAnalyticsAdapter
@@ -91,7 +129,7 @@ class Adapters
         @_storage.set(@queue_name, JSON.stringify(@_queue))
 
     _flush: ->
-      throw 'ga not defined. Please make sure your Universal analytics is set up correctly' if typeof ga isnt 'function'
+      throw new Error('ga not defined. Please make sure your Universal analytics is set up correctly') if typeof ga isnt 'function'
       for item in @_queue
         callback = @_remove_uuid(item.uuid)
         ga('send', 'event', item.category, item.action, item.label, {'hitCallback': callback, 'nonInteraction': 1})
@@ -103,11 +141,11 @@ class Adapters
       @_storage.set(@queue_name, JSON.stringify(@_queue))
       @_flush()
 
-    experiment_start: (experiment_name, variant) =>
-      @_track(@namespace, "#{experiment_name} | #{variant}", 'Visitors')
+    experiment_start: (experiment, variant) ->
+      @_track(@namespace, "#{experiment.name} | #{variant}", 'Visitors')
 
-    goal_complete: (experiment_name, variant, goal) =>
-      @_track(@namespace, "#{experiment_name} | #{variant}", goal)
+    goal_complete: (experiment, variant, goal_name, _props) ->
+      @_track(@namespace, "#{experiment.name} | #{variant}", goal_name)
 
 
   class @PersistentQueueKeenAdapter
@@ -119,34 +157,43 @@ class Adapters
       @_queue = JSON.parse(@_storage.get(@queue_name) || '[]')
       @_flush()
 
-    _remove_uuid: (uuid) ->
+    _remove_quuid: (quuid) ->
       (err, res) =>
         return if err
-        utils.remove(@_queue, (el) -> el.properties.uuid == uuid)
+        utils.remove(@_queue, (el) -> el.properties._quuid == quuid)
         @_storage.set(@queue_name, JSON.stringify(@_queue))
 
     _flush: ->
       for item in @_queue
-        callback = @_remove_uuid(item.properties.uuid)
-        @client.addEvent(item.experiment_name, item.properties, callback)
+        callback = @_remove_quuid(item.properties._quuid)
+        @client.addEvent(item.experiment_name, utils.omit(item.properties, '_quuid'), callback)
 
-    _track: (experiment_name, variant, event) ->
-      utils.log("Persistent Queue Keen track: #{experiment_name}, #{variant}, #{event}")
+    _user_uuid: (experiment, goal) ->
+      return utils.uuid() unless experiment.user_id
+      # if goal is not unique, we track it every time. return a new random uuid
+      return utils.uuid() unless goal.unique
+      # for a given user id, namespace and experiment, the uuid will always be the same
+      # this avoids counting goals twice for the same user across different devices
+      utils.sha1("#{@namespace}.#{experiment.name}.#{experiment.user_id}")
+
+    _track: (experiment, variant, goal) ->
+      utils.log("Persistent Queue Keen track: #{experiment.name}, #{variant}, #{goal.name}")
       @_queue.shift() if @_queue.length > 100
       @_queue.push
-        experiment_name: experiment_name
+        experiment_name: experiment.name
         properties:
-          uuid: utils.uuid()
+          _quuid: utils.uuid()  # queue uuid (used only internally)
+          uuid: @_user_uuid(experiment, goal)
           variant: variant
-          event: event
+          event: goal.name
       @_storage.set(@queue_name, JSON.stringify(@_queue))
       @_flush()
 
-    experiment_start: (experiment_name, variant) =>
-      @_track(experiment_name, variant, 'participate')
+    experiment_start: (experiment, variant) ->
+      @_track(experiment, variant, {name: 'participate', unique: true})
 
-    goal_complete: (experiment_name, variant, goal) =>
-      @_track(experiment_name, variant, goal)
+    goal_complete: (experiment, variant, goal_name, props) ->
+      @_track(experiment, variant, utils.defaults({name: goal_name}, props))
 
 
   class @GoogleUniversalAnalyticsAdapter
@@ -154,14 +201,14 @@ class Adapters
 
     @_track: (category, action, label) ->
       utils.log("Google Universal Analytics track: #{category}, #{action}, #{label}")
-      throw 'ga not defined. Please make sure your Universal analytics is set up correctly' if typeof ga isnt 'function'
+      throw new Error('ga not defined. Please make sure your Universal analytics is set up correctly') if typeof ga isnt 'function'
       ga('send', 'event', category, action, label, {'nonInteraction': 1})
 
-    @experiment_start: (experiment_name, variant) =>
-      @_track(@namespace, "#{experiment_name} | #{variant}", 'Visitors')
+    @experiment_start: (experiment, variant) ->
+      @_track(@namespace, "#{experiment.name} | #{variant}", 'Visitors')
 
-    @goal_complete: (experiment_name, variant, goal) =>
-      @_track(@namespace, "#{experiment_name} | #{variant}", goal)
+    @goal_complete: (experiment, variant, goal_name, _props) ->
+      @_track(@namespace, "#{experiment.name} | #{variant}", goal_name)
 
 
   class @LocalStorageAdapter
@@ -172,4 +219,4 @@ class Adapters
       new Storage(@namespace).get(key)
 
 
-module.exports = Adapters
+export default Adapters

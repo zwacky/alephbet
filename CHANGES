@@ -1,3 +1,53 @@
+* 0.21.0 upgrade to webpacker 5 + jest (@joker-777)
+    - reduced the package size
+    - removed lodash dependency
+    - introduce jest + webpacker 5
+
+* 0.20.1 logging small fix
+
+* 0.20.0 adding RailsAdapter + internal refactoring
+
+* 0.19.1 exposing LamedAdapter though Alephbet
+
+* 0.19.0 adding LamedAdapter (inherits from GimelAdapter)
+    - see https://github.com/Alephbet/lamed
+    - the lamed and gimel backend APIs are identical.
+      However, gimel and lamed storage makes uuid generation different.
+      Technically, updating the GimelAdapter should be ok, but can break
+      backwards compatibility for *currently running experiments* (only).
+      It was therefore sensible to create a separate adapter for lamed (and
+      also for future changes)* 0.18.3 moved from node-uuid to uuid
+
+* 0.18.2 removed source maps from minified version
+
+* 0.18.1 changed main to point to dist/alephbet.min.js
+
+* 0.18.0 moving from browserify to webpack
+         and upgrading dependencies to latest versions
+
+* 0.17.4 swap store with basil.js
+
+* 0.17.3 use relative path (contributed by @rbalicki2)
+
+* 0.17.2 added dist for 0.17.1
+
+* 0.17.1 throwing real errors (contributed by @joker-777)
+
+* 0.17.0 added weight option (contributed by @szymansd)
+    - you can now add a `weight` key to your variants
+      and the random pick will be weighted accordingly.
+
+* 0.16.0 upgrade store.js to v2
+
+* 0.15.0 BREAKING changes (only if you wrote your own tracking adapter)
+    - User-based / Cross-device tracking
+    - If you use your own tracking adapter, you'll have to change it.
+      * `experiment_start` now expects `experiment` as the first parameter
+        (instead of just the `experiment_name`)
+      * `goal_complete` now also accepts the `experiment` as the first parameter
+        and also the goal `props` as an extra parameter.
+    - see https://github.com/Alephbet/alephbet/issues/16
+
 * 0.14.4 using window.jQuery instead of $ in Gimel adapter
 
 * 0.14.3 small fixes to bower.json / package.json

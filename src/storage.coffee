@@ -1,9 +1,10 @@
-store = require('store')
+import Basil from 'basil.js'
 
-# a thin wrapper around store.js for easy swapping
+store = new Basil(namespace: null)
+
+# a thin wrapper around basil.js for easy swapping
 class Storage
   constructor: (@namespace='alephbet') ->
-    throw 'local storage not supported' unless store.enabled
     @storage = store.get(@namespace) || {}
   set: (key, value) ->
     @storage[key] = value
@@ -13,4 +14,4 @@ class Storage
     @storage[key]
     # store.get("#{@namespace}:#{key}")
 
-module.exports = Storage
+export default Storage
